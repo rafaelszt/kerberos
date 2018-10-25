@@ -321,27 +321,35 @@ def process_command(operation, user_email, params):
     auth_client = Duo(**auth_client_key)
     
     if operation in user_endpoints:
-        if operation == "user-database-access":
-            params = {"db_code": params[0]}
-        elif operation == "user-database-list":
-            if params:
-                params = {"search_param": params[0]}
-            else:
-                params = {"search_param": None}
+        try:
+            if operation == "user-database-access":
+                params = {"db_code": params[0]}
+            elif operation == "user-database-list":
+                if params:
+                    params = {"search_param": params[0]}
+                else:
+                    params = {"search_param": None}
+        
+        except KeyError:
+            return "Ops, missing command parameters."
 
         return process_user_op(operation, user_email, auth_client, **params)
 
     if operation in admin_endpoints:
-        if operation == "admin-user-create":
-            params = {"email": params[0], "phone_number": params[1]}
-        elif operation == "admin-user-delete":
-            params = {"email": params[0]}
-        elif operation == "admin-database-add":
-            params = {"email": params[0], "db_id": params[1], "username": params[2]}
-        elif operation == "admin-database-remove":
-            params = {"email": params[0], "db_id": params[1]}
-        else:
-            params = {}
+        try:
+            if operation == "admin-user-create":
+                params = {"email": params[0], "phone_number": params[1]}
+            elif operation == "admin-user-delete":
+                params = {"email": params[0]}
+            elif operation == "admin-database-add":
+                params = {"email": params[0], "db_id": params[1], "username": params[2]}
+            elif operation == "admin-database-remove":
+                params = {"email": params[0], "db_id": params[1]}
+            else:
+                params = {}
+
+        except KeyError:
+            return "Ops, missing command parameters."
 
         return process_admin_op(operation, user_email, auth_client, **params)
 
