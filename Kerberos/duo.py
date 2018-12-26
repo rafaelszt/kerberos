@@ -10,13 +10,13 @@ class Duo:
             host=kwargs['host']
         )
 
-    def create_user(self, email, country_code="+55", number=None, use_push=False):
+    def create_user(self, email, country_code='+55', number=None, use_push=False):
         """Creates a Duo user and return a user_id"""
         username = email.split('@')[0]
         try:
             enroll_res = self.auth_api.enroll(username=username)
         except RuntimeError as e:
-            if str(e) == "Received 400 Invalid request parameters (username already exists)":
+            if str(e) == 'Received 400 Invalid request parameters (username already exists)':
                 return {'user_id': username}
 
         return {'user_id': enroll_res['username']}

@@ -19,8 +19,8 @@ class TestSlackIntegration(unittest.TestCase):
         Slack.response_url = None
         with self.assertLogs(level='ERROR') as cm:
             log_name = logger.name
-            err_msg = "{'type': 'error', 'message': 'Response URL not set.'}"
-            Slack.response("")
+            err_msg = '{"type": "error", "message": "Response URL not set."}'
+            Slack.response('')
             self.assertEqual(cm.output, ['ERROR:{}:{}'.format(log_name, err_msg)])
 
     def test_process_params(self):
@@ -33,8 +33,8 @@ class TestSlackIntegration(unittest.TestCase):
                 Slack.process_params(event, None)
 
                 log_name = logger.name
-                err_msg_1 = "{'type': 'error', 'message': 'Failed to decrypt Slack Token.'}"
-                err_msg_2 = "{'type': 'error', 'message': 'Failed to get email from Slack.'}"
+                err_msg_1 = '{"type": "error", "message": "Failed to decrypt Slack Token."}'
+                err_msg_2 = '{"type": "error", "message": "Failed to get email from Slack."}'
 
                 self.assertEqual(cm.output, [
                     'ERROR:{}:{}'.format(log_name, err_msg_1),

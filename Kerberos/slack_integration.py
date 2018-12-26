@@ -15,7 +15,7 @@ class Slack:
 
     @staticmethod
     def process_params(event, context):
-        '''Process a Slack request.'''
+        """Process a Slack request."""
         body = Slack.parse_body(event.get('body'))
         # Verify if the message came from Slack
         if body.get('token') not in os.getenv('SLACK_TOKEN'):
@@ -27,7 +27,7 @@ class Slack:
         # We need this because of Slack reponse timeout
         if not event.get('async'):
             Slack.invoke_self_async(event, context)
-            return {'status': 'finalize', 'values': "{'response_type': 'ephemeral', 'text': '>Got it! This may take a few seconds.'}"}
+            return {'status': 'finalize', 'values': '{"response_type": "ephemeral", "text": ">Got it! This may take a few seconds."}'}
 
         # The URL we need to communicate with Slack asynchronous.
         Slack.response_url = body.get('response_url')
@@ -40,7 +40,7 @@ class Slack:
         # Get the user email from Slack
         user_email = Slack.get_email_from_slack(body['user_id'])
         if not user_email:
-            result = Slack.response('Error, please contact your administrator.')
+            Slack.response('Error, please contact your administrator.')
             msg = 'Failed to get email from Slack.'
             logger.error({'type': 'error', 'message': msg})
 
@@ -52,10 +52,10 @@ class Slack:
 
     @staticmethod
     def invoke_self_async(event, context):
-        '''
+        """
         Invoke the Lambda again asynchronously, passing the same event it
         received, and adding the tag 'async' so we know to process it
-        '''
+        """
         event['async'] = True
         called_function = context.invoked_function_arn
         boto3.client('lambda').invoke(
@@ -66,7 +66,7 @@ class Slack:
 
     @staticmethod
     def get_email_from_slack(user_id):
-        '''Return the email address associated with the ID on Slack.'''
+        """Return the email address associated with the ID on Slack."""
         url = 'https://slack.com/api/users.profile.get'
         oauth_key = os.getenv('SLACK_OAUTH_TOKEN')
         try:

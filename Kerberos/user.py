@@ -10,7 +10,7 @@ logger.setLevel(logging.INFO)
 class User:
     @staticmethod
     def create(table, auth_instance, email, phone_number):
-        logger.info({"status": "create", "type": "user", "email": email})
+        logger.info({'status': 'create', 'type': 'user', 'email': email})
 
         auth_user = auth_instance.create_user(email, phone_number, use_push=True)
         user_id = auth_user['user_id']
@@ -27,7 +27,7 @@ class User:
 
     @staticmethod
     def delete(table, email):
-        logger.info({"status": "delete", "type": "user", "email": email})
+        logger.info({'status': 'delete', 'type': 'user', 'email': email})
         table.delete_item(
             Key={
                 'email': email,
@@ -39,7 +39,7 @@ class User:
 
     @staticmethod
     def grant_access(table, email, db_id, db_username):
-        logger.info({"status": "grant", "type": "user", "email": email, "db_id": db_id, "username": db_username})
+        logger.info({'status': 'grant', 'type': 'user', 'email': email, 'db_id': db_id, 'username': db_username})
         table.update_item(
             Key={
                 'email': email,
@@ -60,7 +60,7 @@ class User:
 
     @staticmethod
     def remove_access(table, email, db_id):
-        logger.info({"status": "remove", "type": "user", "email": email, "db_id": db_id})
+        logger.info({'status': 'remove', 'type': 'user', 'email': email, 'db_id': db_id})
 
         table.update_item(
             Key={
@@ -73,7 +73,6 @@ class User:
             }
         )
 
-    #TODO: Remove type: user
     @staticmethod
     def exists(table, email):
         return table.get_item(
@@ -81,5 +80,5 @@ class User:
                     'email': email,
                     'type': 'user'
                 }
-            ).get("Item")
+            ).get('Item')
         
