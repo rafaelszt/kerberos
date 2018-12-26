@@ -13,7 +13,7 @@ class Authy:
             'Content-Type': "application/x-www-form-urlencoded"
             }
 
-    def create_user(self, email, number, country_code="+55", use_authy=False):
+    def create_user(self, email, number, country_code="+55", use_push=False):
         """Creates an Authy user"""
         url = "https://api.authy.com/protected/json/users/new"
 
@@ -22,7 +22,7 @@ class Authy:
             "&user%5Bcellphone%5D={}"
             "&user%5Bcountry_code%5D={}"
             "&send_install_link_via_sms={}").format(
-                email, number, country_code, use_authy
+                email, number, country_code, use_push
             )
 
         response = requests.request("POST", url, data=payload, headers=self.headers)

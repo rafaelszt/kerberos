@@ -3,8 +3,6 @@ import boto3
 from base64 import b64decode
 import logging
 
-from authy import Authy
-
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -14,14 +12,14 @@ class User:
     def create(table, auth_instance, email, phone_number):
         logger.info({"status": "create", "type": "user", "email": email})
 
-        authy_user = auth_instance.create_user(email, phone_number, use_authy=True)
-        authy_id = authy_user['user']['id']
+        auth_user = auth_instance.create_user(email, phone_number, use_push=True)
+        user_id = auth_user['user_id']
 
         table.put_item(
             Item={
                 'email': email,
                 'type': 'user',
-                'authy_id': authy_id,
+                'user_id': user_id,
                 'db_list': {}
         })
         
@@ -75,6 +73,7 @@ class User:
             }
         )
 
+    #TODO: Remove type: user
     @staticmethod
     def exists(table, email):
         return table.get_item(
