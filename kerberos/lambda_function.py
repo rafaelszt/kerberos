@@ -14,7 +14,7 @@ import os
 import logging
 import json
 from base64 import b64decode
-from datetime import datetime
+
 import boto3
 from botocore.exceptions import ClientError
 from boto3.dynamodb.conditions import Attr
@@ -22,10 +22,12 @@ from boto3.dynamodb.conditions import Attr
 from slack_integration import Slack
 from duo import Duo
 from user import User
+from database_management import DatabaseManagement
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+db = DatabaseManagement()
 
 def log(err_type, msg):
     """Logs a error with the right message format."""
@@ -38,19 +40,7 @@ def log(err_type, msg):
 
 
 def get_item_from_dynamo(table_name, search):
-    """Return an item from a given table in JSON format."""
-    aws_conn = boto3.resource('dynamodb')
-    table = aws_conn.Table(table_name)
-
-    response = table.get_item(Key=search)
-    try:
-        return response['Item']
-    except KeyError:
-        log(
-            'error',
-            'Could not get item from dynamo on table {} with search {}'.format(table_name, search)
-        )
-        return {}
+    return db.get_item_from_dynamo(table_name, search)
 
 
 def user_management(db_type, db_name, region, username):
@@ -67,6 +57,13 @@ def user_management(db_type, db_name, region, username):
     function_prefix = os.getenv('FUNCTION_NAME_PREFIX')
     response = client.invoke(FunctionName='{}-{}'.format(function_prefix, db_name),
                              Payload=payload)
+
+    if response.get('FunctionError'):
+        log(
+            'error',
+            'Error on gate lambda. Stack trace: {}'.format(response['Payload'].read())
+        )
+        return None
 
     try:
         payload = response['Payload']
@@ -101,31 +98,13 @@ def verify_mfa(user_email, user_type, auth_client, mfa_code=None, use_push=False
 
 
 def get_user_dbs(user_email, access_type='user'):
-    """Return the databases ID the user has access to."""
-    search = {'email': user_email, 'type': access_type}
-
-    result = get_item_from_dynamo(os.getenv('DYNAMODB_USER_TABLE'), search)
-    return result.get('db_list')
+    table_name = os.getenv('DYNAMODB_USER_TABLE')
+    return db.get_user_dbs(user_email, table_name, access_type)
 
 
 def get_dbs_info(dbs_ids):
-    """Return the databases names."""
-    dbs_info = []
     table_name = os.getenv('DYNAMODB_REGISTERED_DBS')
-
-    for db_id in dbs_ids:
-        db_info = get_item_from_dynamo(table_name, {'id': db_id})
-
-        if not db_info:
-            log(
-                'error',
-                'Failed to get Database information.'
-            )
-            return None
-
-        dbs_info.append(db_info)
-
-    return dbs_info
+    return db.get_dbs_info(dbs_ids, table_name)  
 
 
 def get_user_access(db_code, username):
@@ -144,7 +123,7 @@ def get_db_access(user_dbs, db_code, user_email):
     secret = get_user_access(db_code, username)
 
     if not secret:
-        return None
+        return '`Failed to get user credentials. Please contact your administrator`'
 
     response_txt = ''
     for k, v in secret.items():
@@ -154,38 +133,13 @@ def get_db_access(user_dbs, db_code, user_email):
 
 
 def get_db_ids():
-    aws_conn = boto3.resource('dynamodb')
-    table = aws_conn.Table(os.getenv('DYNAMODB_REGISTERED_DBS'))
-
-    dbs_info = table.scan()['Items']
-    
-    ids = []
-    for db in dbs_info:
-        ids.append(db['id'])
-        
-    return ids
+    table_name = os.getenv('DYNAMODB_REGISTERED_DBS')
+    return db.get_db_ids(table_name)
         
 
 def get_db_list(user_dbs, filter_param):
-    """Return a formated message to Slack with the database information."""
-    aws_conn = boto3.resource('dynamodb')
-    table = aws_conn.Table(os.getenv('DYNAMODB_REGISTERED_DBS'))
-
-    dbs_info = {}
-    if filter_param:
-        fe = Attr('name').contains(filter_param)
-        dbs_info = table.scan(FilterExpression=fe)['Items']
-        
-    else:
-        dbs_info = table.scan()['Items']
-
-    response_txt = ''
-    for db in dbs_info:
-        if db['id'] in user_dbs:
-            response_txt += 'Id: {}\n\tName: {}\n\tType: {}\n'.format(
-                db['id'], db['name'], db['type'])
-    
-    return '```{}```'.format(response_txt)
+    table_name = os.getenv('DYNAMODB_REGISTERED_DBS')
+    return db.get_db_list(user_dbs, filter_param, table_name)
 
 
 def process_user_op(operation, user_email, auth_client, **kwargs):
@@ -368,7 +322,7 @@ def already_requested(lambda_requestID, api_requestId, timestamp):
 def lambda_handler(event, context):
     """Main Lambda function"""
     # Check if it's our keep alive call
-    if event.get('source') == 'aws.events' and event.get('account') == os.getenv('AWS_ACCOUNT_ID'):
+    if event.get('source') == 'aws.events':
         log(
             'debug',
             'Keep Warm triggered.'

@@ -81,6 +81,7 @@ class Slack:
         try:
             return response.json()['profile']['email']
         except KeyError:
+            logger.error({'type': 'error', 'message': response.text})
             return None
 
     @staticmethod
