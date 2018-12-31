@@ -79,4 +79,4 @@ class DatabaseManagement:
                 response_txt += 'Id: {}\n\tName: {}\n\tType: {}\n'.format(
                     db['id'], db['name'], db['type'])
         
-        return '```{}```'.format(response_txt)
+        return response_txt

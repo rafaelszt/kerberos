@@ -174,7 +174,7 @@ def process_user_op(operation, user_email, auth_client, **kwargs):
 
     elif operation == 'user-database-list':
         search_param = kwargs['search_param']
-        response = get_db_list(user_dbs, search_param)
+        response = '```{}```'.format(get_db_list(user_dbs, search_param))
 
     return response
 
@@ -205,7 +205,7 @@ def process_admin_op(operation, user_email, auth_client, **kwargs):
     table = aws_conn.Table(os.getenv('DYNAMODB_USER_TABLE'))
 
     if operation == 'admin-database-list':
-        return get_db_list(dbs_id, None)
+        return '```{}```'.format(get_db_list(0, None))
 
     email = kwargs['email']
     if operation == 'admin-user-create':
