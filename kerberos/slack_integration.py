@@ -95,12 +95,9 @@ class Slack:
         for k, v in credentials.items():
             try:
                 db_name, db_type = v
-                value = f'\tName: {db_name}\n\tType: {db_type}'
-            except Exception as e:
-                print(e)
-
-            else:
-                value = v
+                value = f'\n\tName: {db_name}\n\tType: {db_type}'
+            except (ValueError, TypeError):
+                value = v             
 
             resp += '{}: {}\n'.format(k, value)
 

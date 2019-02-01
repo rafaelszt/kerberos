@@ -61,7 +61,7 @@ class DatabaseManagement:
             
         return ids
 
-    def get_db_list(self, user_dbs, filter_param, table_name):
+    def get_db_list(self, filter_param, table_name):
         """Return a formated message to Slack with the database information."""
         table = self.aws_conn.Table(table_name)
 
