@@ -5,6 +5,8 @@ import boto3
 from base64 import b64decode
 from botocore.vendored import requests
 from urllib.parse import unquote
+import hmac
+from hashlib import sha256
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -18,7 +20,7 @@ class Slack:
         """Process a Slack request."""
         body = Slack.parse_body(event.get('body'))
         # Verify if the message came from Slack
-        if body.get('token') not in os.getenv('SLACK_TOKEN'):
+        if not Slack.validate_request(event):
             msg = 'Call with invalid token.'
             logger.error({'type': 'error', 'message': msg})
             
@@ -112,3 +114,28 @@ class Slack:
             value, item = param.split('=')
             result[unquote(value)] = unquote(item)
         return result
+
+    @staticmethod
+    def validate_request(request):
+        slack_signing_secret = os.getenv('SLACK_TOKEN')
+        try:
+            slack_signing_secret = boto3.client('kms').decrypt(CiphertextBlob=b64decode(slack_signing_secret))['Plaintext']
+        except TypeError:
+            logger.error({'type': 'error', 'message': 'Failed to decrypt Slack Token.'})
+            return False
+
+        timestamp = request['headers']['X-Slack-Request-Timestamp']
+        request_body = request['body']
+        sig_basestring = f'v0:{timestamp}:{request_body}'.encode()
+        
+        my_signature = 'v0=' + hmac.new(
+                slack_signing_secret,
+                sig_basestring,
+                sha256
+            ).hexdigest()
+
+        slack_signature = request['headers']['X-Slack-Signature']
+        if hmac.compare_digest(my_signature, slack_signature):
+            return True
+
+        return False
