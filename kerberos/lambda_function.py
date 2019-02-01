@@ -146,13 +146,26 @@ def get_db_list(user_dbs, filter_param):
     return result_dbs
 
 
-def process_user_op(operation, user_email, auth_client, **kwargs):
+def process_user_op(operation, user_email, auth_client, kwargs):
     """
         Process an user operation.
         kwargs:
             dbaccess -> db_code
             dblist -> search_params
     """
+    params = {}
+    try:
+        if operation == "user-database-access":
+            params = {"db_code": kwargs[0]}
+        elif operation == "user-database-list":
+            if kwargs:
+                params = {"search_param": kwargs[0]}
+            else:
+                params = {"search_param": None}
+    
+    except KeyError:
+        return "Ops, missing command parameters."
+
     aws_conn = boto3.resource('dynamodb')
     table = aws_conn.Table(os.getenv('DYNAMODB_USER_TABLE'))
 
@@ -173,17 +186,17 @@ def process_user_op(operation, user_email, auth_client, **kwargs):
         return 'You have no databases to access.'
     
     if operation == 'user-database-access':
-        db_code = kwargs['db_code']
+        db_code = params.get('db_code')
         response = get_db_access(user_dbs, db_code, user_email)
 
     elif operation == 'user-database-list':
-        search_param = kwargs['search_param']
+        search_param = params.get('search_param')
         response = get_db_list(user_dbs, search_param)
 
     return response
 
 
-def process_admin_op(operation, user_email, auth_client, **kwargs):
+def process_admin_op(operation, user_email, auth_client, kwargs):
     """
         Process an admin operation.
         kwargs:
@@ -192,6 +205,19 @@ def process_admin_op(operation, user_email, auth_client, **kwargs):
             admin-dbadd -> email, db_id, username
             admin-dbremove -> email, db_id
     """
+    params = {}
+    try:
+        if operation == "admin-user-create":
+            params = {"email": kwargs[0], "phone_number": kwargs[1]}
+        elif operation == "admin-user-delete":
+            params = {"email": kwargs[0]}
+        elif operation == "admin-database-add":
+            params = {"email": kwargs[0], "db_id": kwargs[1], "username": kwargs[2]}
+        elif operation == "admin-database-remove":
+            params = {"email": kwargs[0], "db_id": kwargs[1]}
+
+    except KeyError:
+        return "Ops, missing command parameters."
     dbs_id = get_db_ids()
     response = '>Operation Successful'
 
@@ -211,9 +237,9 @@ def process_admin_op(operation, user_email, auth_client, **kwargs):
     if operation == 'admin-database-list':
         return get_db_list(0, None)
 
-    email = kwargs['email']
+    email = params.get('email')
     if operation == 'admin-user-create':
-        phone_number = kwargs['phone_number']
+        phone_number = params.get('phone_number')
         User.create(table, auth_client, email, phone_number)
     
     # The operations after this require the user to exist
@@ -221,13 +247,13 @@ def process_admin_op(operation, user_email, auth_client, **kwargs):
         return 'This user does not exist.'
 
     if operation == 'admin-database-remove':
-        db_id = kwargs['db_id']
+        db_id = params.get('db_id')
         User.remove_access(table, email, db_id)
 
     elif operation == 'admin-database-add':
-        db_id = kwargs['db_id']
+        db_id = params.get('db_id')
         if db_id in dbs_id:
-            User.grant_access(table, email, db_id, kwargs['username'])
+            User.grant_access(table, email, db_id, params.get('username'))
             return response
 
         else:
@@ -251,37 +277,10 @@ def process_command(operation, user_email, params):
     auth_client = Duo(**auth_client_key)
     
     if operation in user_endpoints:
-        try:
-            if operation == "user-database-access":
-                params = {"db_code": params[0]}
-            elif operation == "user-database-list":
-                if params:
-                    params = {"search_param": params[0]}
-                else:
-                    params = {"search_param": None}
-        
-        except KeyError:
-            return "Ops, missing command parameters."
-
-        return process_user_op(operation, user_email, auth_client, **params)
+        return process_user_op(operation, user_email, auth_client, params)
 
     if operation in admin_endpoints:
-        try:
-            if operation == "admin-user-create":
-                params = {"email": params[0], "phone_number": params[1]}
-            elif operation == "admin-user-delete":
-                params = {"email": params[0]}
-            elif operation == "admin-database-add":
-                params = {"email": params[0], "db_id": params[1], "username": params[2]}
-            elif operation == "admin-database-remove":
-                params = {"email": params[0], "db_id": params[1]}
-            else:
-                params = {}
-
-        except KeyError:
-            return "Ops, missing command parameters."
-
-        return process_admin_op(operation, user_email, auth_client, **params)
+        return process_admin_op(operation, user_email, auth_client, params)
 
     return 'Unknown Error'
 
