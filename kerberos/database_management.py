@@ -73,10 +73,4 @@ class DatabaseManagement:
         else:
             dbs_info = table.scan()['Items']
 
-        response_txt = ''
-        for db in dbs_info:
-            if db['id'] in user_dbs:
-                response_txt += 'Id: {}\n\tName: {}\n\tType: {}\n'.format(
-                    db['id'], db['name'], db['type'])
-        
-        return response_txt
+        return dbs_info

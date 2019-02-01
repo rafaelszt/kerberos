@@ -20,6 +20,7 @@ from botocore.exceptions import ClientError
 from boto3.dynamodb.conditions import Attr
 
 from slack_integration import Slack
+from email_integration import Email
 from duo import Duo
 from user import User
 from database_management import DatabaseManagement
@@ -123,13 +124,9 @@ def get_db_access(user_dbs, db_code, user_email):
     secret = get_user_access(db_code, username)
 
     if not secret:
-        return '`Failed to get user credentials. Please contact your administrator`'
+        return 'Failed to get user credentials. Please contact your administrator'
 
-    response_txt = ''
-    for k, v in secret.items():
-        response_txt += '{}: {}\n'.format(k, v)
-
-    return '```{}```'.format(response_txt)
+    return secret
 
 
 def get_db_ids():
@@ -139,7 +136,14 @@ def get_db_ids():
 
 def get_db_list(user_dbs, filter_param):
     table_name = os.getenv('DYNAMODB_REGISTERED_DBS')
-    return db.get_db_list(user_dbs, filter_param, table_name)
+    result_dbs = {}
+
+    dbs_info = db.get_db_list(filter_param, table_name)
+    for db_info in dbs_info:
+        if db_info['id'] in user_dbs:
+            result_dbs[db_info['id']] = (db_info['name'], db_info['type'],)
+
+    return result_dbs
 
 
 def process_user_op(operation, user_email, auth_client, **kwargs):
@@ -174,7 +178,7 @@ def process_user_op(operation, user_email, auth_client, **kwargs):
 
     elif operation == 'user-database-list':
         search_param = kwargs['search_param']
-        response = '```{}```'.format(get_db_list(user_dbs, search_param))
+        response = get_db_list(user_dbs, search_param)
 
     return response
 
@@ -205,7 +209,7 @@ def process_admin_op(operation, user_email, auth_client, **kwargs):
     table = aws_conn.Table(os.getenv('DYNAMODB_USER_TABLE'))
 
     if operation == 'admin-database-list':
-        return '```{}```'.format(get_db_list(0, None))
+        return get_db_list(0, None)
 
     email = kwargs['email']
     if operation == 'admin-user-create':
@@ -339,19 +343,25 @@ def lambda_handler(event, context):
             'statusCode': 200
         }
 
-    # For now we only have Slack, we can add more methods in the future
-    req = Slack.process_params(event, context)
-    if req['status'] == 'finalize':
-        return {
+    request_type = None
+    if event.get('Records') and event['Records'][0].get('eventSource') == 'aws:ses':
+        request_type = Email()
+    else:
+        request_type = Slack()
+        
+    req = request_type.process_params(event, context)
+    
+    if req.get('status') == 'finalize':
+        return   {
                 'isBase64Encoded': False,
                 'statusCode': 200,
                 'body': '{"response_type": "ephemeral", "text": ">Got it! This may take a few seconds."}'
             }
     
-    elif req['status'] == 'success':
+    elif req.get('status') == 'success':
         values = req['values']
         response = process_command(values['op'], values['email'], values['params'])
-        Slack.response(response)
+        request_type.response(response)
 
     return {
         'isBase64Encoded': False,
