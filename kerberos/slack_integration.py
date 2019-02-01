@@ -85,13 +85,23 @@ class Slack:
             return None
 
     @staticmethod
-    def response(msg):
+    def response(credentials, **kwargs):
         if not Slack.response_url:
             err_msg = 'Response URL not set.'
             logger.error({'type': 'error', 'message': err_msg})
             return err_msg
-        
-        payload = {'text': msg}
+
+        resp = ''
+        for k, v in credentials.items():
+            try:
+                db_name, db_type = v
+                value = f'\n\tName: {db_name}\n\tType: {db_type}'
+            except (ValueError, TypeError):
+                value = v             
+
+            resp += '{}: {}\n'.format(k, value)
+
+        payload = {'text': f'```{resp}```'}
         return requests.post(Slack.response_url, data=json.dumps(payload))
 
     @staticmethod

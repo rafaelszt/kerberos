@@ -61,7 +61,7 @@ class DatabaseManagement:
             
         return ids
 
-    def get_db_list(self, user_dbs, filter_param, table_name):
+    def get_db_list(self, filter_param, table_name):
         """Return a formated message to Slack with the database information."""
         table = self.aws_conn.Table(table_name)
 
@@ -73,10 +73,4 @@ class DatabaseManagement:
         else:
             dbs_info = table.scan()['Items']
 
-        response_txt = ''
-        for db in dbs_info:
-            if db['id'] in user_dbs:
-                response_txt += 'Id: {}\n\tName: {}\n\tType: {}\n'.format(
-                    db['id'], db['name'], db['type'])
-        
-        return response_txt
+        return dbs_info
