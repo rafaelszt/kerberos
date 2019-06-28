@@ -2,7 +2,7 @@ import os
 import logging
 import json
 import boto3
-from base64 import b64decode
+import base64
 from botocore.vendored import requests
 from urllib.parse import unquote
 import hmac
@@ -42,7 +42,7 @@ class Slack:
         # Get the user email from Slack
         user_email = Slack.get_email_from_slack(body['user_id'])
         if not user_email:
-            Slack.response('Error, please contact your administrator.')
+            Slack.respond('Error, please contact your administrator.')
             msg = 'Failed to get email from Slack.'
             logger.error({'type': 'error', 'message': msg})
 
@@ -70,10 +70,9 @@ class Slack:
     def get_email_from_slack(user_id):
         """Return the email address associated with the ID on Slack."""
         url = 'https://slack.com/api/users.profile.get'
-        oauth_key = os.getenv('SLACK_OAUTH_TOKEN')
         try:
-            oauth_key = boto3.client('kms').decrypt(CiphertextBlob=b64decode(oauth_key))['Plaintext']
-        except TypeError:
+            oauth_key = boto3.client('secretsmanager').get_secret_value(SecretId=os.environ['SLACK_OAUTH_TOKEN_SECRETSMANAGER_ARN'])['SecretString']
+        except (TypeError, base64.binascii.Error):
             logger.error({'type': 'error', 'message': 'Failed to decrypt Slack Token.'})
             return None
 
@@ -87,23 +86,37 @@ class Slack:
             return None
 
     @staticmethod
-    def response(credentials, **kwargs):
+    def generate_response_payload(response_text):
+        """Return a formated response payload to send to Slack."""
+        resp = ''
+        if isinstance(response_text, str):
+            resp = response_text
+
+        elif isinstance(response_text, list):
+            for i in response_text:
+                resp = f'{resp}{i}\n'
+                    
+        else:
+            for k, v in response_text.items():
+                try:
+                    db_name, db_type = v
+                    value = f'\n\tName: {db_name}\n\tType: {db_type}'
+                except (ValueError, TypeError):
+                    value = v             
+
+                resp += '{}: {}\n'.format(k, value)
+
+        return {'text': f'```{resp}```'}
+
+    @staticmethod
+    def respond(return_text):
         if not Slack.response_url:
             err_msg = 'Response URL not set.'
             logger.error({'type': 'error', 'message': err_msg})
             return err_msg
 
-        resp = ''
-        for k, v in credentials.items():
-            try:
-                db_name, db_type = v
-                value = f'\n\tName: {db_name}\n\tType: {db_type}'
-            except (ValueError, TypeError):
-                value = v             
-
-            resp += '{}: {}\n'.format(k, value)
-
-        payload = {'text': f'```{resp}```'}
+        payload = Slack.generate_response_payload(return_text)
+        
         return requests.post(Slack.response_url, data=json.dumps(payload))
 
     @staticmethod
@@ -117,19 +130,18 @@ class Slack:
 
     @staticmethod
     def validate_request(request):
-        slack_signing_secret = os.getenv('SLACK_TOKEN')
         try:
-            slack_signing_secret = boto3.client('kms').decrypt(CiphertextBlob=b64decode(slack_signing_secret))['Plaintext']
-        except TypeError:
+            slack_signing_secret = boto3.client('secretsmanager').get_secret_value(SecretId=os.environ['SLACK_TOKEN_SECRETSMANAGER_ARN'])['SecretString']
+        except (TypeError, base64.binascii.Error):
             logger.error({'type': 'error', 'message': 'Failed to decrypt Slack Token.'})
             return False
 
         timestamp = request['headers']['X-Slack-Request-Timestamp']
         request_body = request['body']
         sig_basestring = f'v0:{timestamp}:{request_body}'.encode()
-        
+
         my_signature = 'v0=' + hmac.new(
-                slack_signing_secret,
+                slack_signing_secret.encode(),
                 sig_basestring,
                 sha256
             ).hexdigest()

@@ -74,3 +74,38 @@ class DatabaseManagement:
             dbs_info = table.scan()['Items']
 
         return dbs_info
+
+    def get_role_info(self, roles_id, table_name):
+        """Return role names."""
+        roles_info = []
+
+        for role_id in roles_id:
+            role_info = self.get_item_from_dynamo(table_name, {'id': role_id})
+
+            if not role_info:
+                logger.error({
+                    'error',
+                    'Failed to get Database information.'
+                })
+                return None
+
+            roles_info.append(role_info)
+
+        return roles_info
+
+    def get_role_ids(self, table_name):
+        table = self.aws_conn.Table(table_name)
+        roles_info = table.scan()['Items']
+        
+        ids = []
+        for role in roles_info:
+            ids.append(role['id'])
+            
+        return ids
+
+    def get_role_list(self, table_name):
+        """Return a formated message to Slack with the roles information."""
+        table = self.aws_conn.Table(table_name)
+        roles_info = table.scan()['Items']
+
+        return roles_info

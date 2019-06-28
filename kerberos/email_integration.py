@@ -44,7 +44,7 @@ class Email:
         return  {'status': 'success', 'values': values}
 
     @staticmethod
-    def response(credentials, **kwargs):
+    def respond(credentials, **kwargs):
         Email.send_email(Email.user_email, credentials)
 
     @staticmethod

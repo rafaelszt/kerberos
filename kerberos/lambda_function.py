@@ -23,264 +23,243 @@ from slack_integration import Slack
 from email_integration import Email
 from duo import Duo
 from user import User
-from database_management import DatabaseManagement
+from role import Role
+from schema import Schema
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-db = DatabaseManagement()
-
-def log(err_type, msg):
-    """Logs a error with the right message format."""
-    if err_type == 'error':
-        logger.error({'type': 'error', 'message': msg})
-    elif err_type == 'info':
-        logger.info({'type': 'info', 'message': msg})
-    elif err_type == 'debug':
-        logger.debug({'type': 'debug', 'message': msg})
-
-
-def get_item_from_dynamo(table_name, search):
-    return db.get_item_from_dynamo(table_name, search)
-
-
-def user_management(db_type, db_name, region, username):
-    """Invoke the Lambda to change the password"""
-    client = boto3.client('lambda', region_name=region)
-    payload = json.dumps(
-        {'db_name': db_name,
-         'db_region': region,
-         'db_type': db_type,
-         'username': username}
-        )
-
-    # Invoke the lambda
-    function_prefix = os.getenv('FUNCTION_NAME_PREFIX')
-    response = client.invoke(FunctionName='{}-{}'.format(function_prefix, db_name),
-                             Payload=payload)
-
-    if response.get('FunctionError'):
-        log(
-            'error',
-            'Error on gate lambda. Stack trace: {}'.format(response['Payload'].read())
-        )
-        return None
-
-    try:
-        payload = response['Payload']
-        return json.loads(payload.read())
-    except KeyError:
-        log(
-            'error',
-            'Failed to get user credentials. Response: {}'.format(payload)
-        )
-        return None
-
 
 def verify_mfa(user_email, user_type, auth_client, mfa_code=None, use_push=False):
     """Verify the user MFA with a push or code."""
-    search = {'email': user_email, 'type': user_type}
-
-    table_name = os.getenv('DYNAMODB_USER_TABLE')
-    user_id = get_item_from_dynamo(table_name, search).get('user_id')
+    user_id = user_email.split('@')[0]
     
     if use_push:
         if not auth_client.push_request(user_id):
-            log(
-                'error',
-                'Failed to verify push request'
-            )
+            logger.error({'status': '2fa', 'reason': 'failed to verify push request', 'user': user_email})
             return False
 
         return True
 
     # Verify with OTP
     return auth_client.verify_token_request(mfa_code, user_id)
+      
 
-
-def get_user_dbs(user_email, access_type='user'):
-    table_name = os.getenv('DYNAMODB_USER_TABLE')
-    return db.get_user_dbs(user_email, table_name, access_type)
-
-
-def get_dbs_info(dbs_ids):
-    table_name = os.getenv('DYNAMODB_REGISTERED_DBS')
-    return db.get_dbs_info(dbs_ids, table_name)  
-
-
-def get_user_access(db_code, username):
-    """Return new credentials for the user."""
-    db_info = get_dbs_info([db_code])
-    if db_info:
-        db_info = db_info[0]
-        return user_management(db_info['type'], db_info['db'], db_info['region'], username)
-
-    return None
-
-
-def get_db_access(user_dbs, db_code, user_email):
-    """Returns a formated Slack response with the secret."""
-    username = user_dbs[db_code]['username']
-    secret = get_user_access(db_code, username)
-
-    if not secret:
-        return 'Failed to get user credentials. Please contact your administrator'
-
-    return secret
-
-
-def get_db_ids():
-    table_name = os.getenv('DYNAMODB_REGISTERED_DBS')
-    return db.get_db_ids(table_name)
-        
-
-def get_db_list(user_dbs, filter_param):
-    table_name = os.getenv('DYNAMODB_REGISTERED_DBS')
-    result_dbs = {}
-
-    dbs_info = db.get_db_list(filter_param, table_name)
-    for db_info in dbs_info:
-        if db_info['id'] in user_dbs:
-            result_dbs[db_info['id']] = (db_info['name'], db_info['type'],)
-
-    return result_dbs
-
-
-def process_user_op(operation, user_email, auth_client, kwargs):
+def process_user_op(operation, user_email, auth_client, args):
     """
         Process an user operation.
         kwargs:
             dbaccess -> db_code
             dblist -> search_params
     """
-    params = {}
-    try:
-        if operation == "user-database-access":
-            params = {"db_code": kwargs[0]}
-        elif operation == "user-database-list":
-            if kwargs:
-                params = {"search_param": kwargs[0]}
-            else:
-                params = {"search_param": None}
-    
-    except KeyError:
-        return "Ops, missing command parameters."
-
-    aws_conn = boto3.resource('dynamodb')
-    table = aws_conn.Table(os.getenv('DYNAMODB_USER_TABLE'))
-
-    if not User.exists(table, user_email):
+    response = '>Operation Successful'
+    if not User.exists(user_email):
         return '>User not registered.'
 
-    response = 'Operation Successful'
     if not verify_mfa(user_email, 'user', auth_client, use_push=True):
-        log(
-            'info',
-            'Failed MFA for User. Email: {}'.format(user_email)
-        )
         return '>MFA: Failed'
-        
-    user_dbs = get_user_dbs(user_email)
 
-    if not user_dbs:
-        return 'You have no databases to access.'
-    
     if operation == 'user-database-access':
-        db_code = params.get('db_code')
-        response = get_db_access(user_dbs, db_code, user_email)
+        if User.has_access(user_email, args[0]):
+            response = User.request_access(user_email, args[0])
+        else:
+            return '>Invalid ID or you don\'t have access to this schema.'
 
-    elif operation == 'user-database-list':
-        search_param = params.get('search_param')
-        response = get_db_list(user_dbs, search_param)
+        if not response:
+            return '>Failed to get user credentials. Please contact your administrator.'
+
+    if operation == 'user-database-list':
+        response = User.get_schemas(user_email)
+
+        if not len(response):
+            return '>No role associated. Please contact your administrator.'
 
     return response
 
 
-def process_admin_op(operation, user_email, auth_client, kwargs):
+def process_role(args):
+    """
+        args:
+            0 -> operation
+            create:
+                1 -> role_name
+            delete, add-schema, remove-schema:
+                1 -> role_id
+                add-schema, remove-schema:
+                    2 -> schema_id
+    """
+    operation = args[0]
+    
+    if operation == 'list':
+        return Role.list_current()
+
+    role = args[1]
+    if role == '':
+        return '>Missing parameters.'
+    
+    if operation == 'create':
+        role_id = Role.create(role)
+
+        return f'>Role created with ID: {role_id}'
+
+    if not Role.exists(role):
+        return '>Role does not exist.'
+    
+    if operation == 'delete':
+        Role.delete(role)
+        return f'>Role {role} deleted.'
+
+    try:
+        schema_id = args[2]
+    except IndexError:
+        return '>No scheme id specified.'
+
+    if operation == 'add-schema':
+        Role.add_schema(role, schema_id)
+
+        return f'>Schema {schema_id} added to role {role}'
+
+    elif operation == 'remove-schema':
+        Role.remove_schema(role, schema_id)
+        return f'>Schema {schema_id} removed from role {role}'
+
+    return False
+
+
+def process_user(auth_instance, args):
+    """
+        args:
+            0 -> operation
+            1 -> email
+            create:
+                2 -> phone_number
+            add-role, remove-role:
+                2 -> role_id
+    """
+    operation = args[0]
+
+    if operation == 'list':
+        return User.list_current()
+
+    email = args[1]    
+    if email == '':
+        return '>No email specified.'
+
+    if operation == 'create':
+        try:
+            phone_number = args[2]
+        except IndexError:
+            return '>No phone number specified.'
+
+        User.create(auth_instance, email, phone_number)
+        return f'>User {email} created.'
+    
+    if not User.exists(email):
+        return f'>User {email} does not exist.'
+
+    if operation == 'delete':
+        User.delete(email)
+        return f'>User {email} deleted.'
+
+    try:
+        role_id = args[2]
+    except IndexError:
+        return '>No role id specified.'
+
+    if operation == 'add-role':
+        User.add_role(email, role_id)
+        return f'>Role {role_id} added to user {email}.'
+    
+    elif operation == 'remove-role':
+        User.remove_role(email, role_id)
+        return f'>Role {role_id} removed from user {email}.'
+
+    return False
+
+
+def process_database():
+    operation = 'list'
+
+    if operation == 'list':
+        return Schema.get_all()
+
+
+def process_admin_op(operation, user_email, auth_client, args):
     """
         Process an admin operation.
         kwargs:
-            admin-usernew -> email, phone_number
-            admin-userdelete -> email
-            admin-dbadd -> email, db_id, username
-            admin-dbremove -> email, db_id
+            adm-user-create -> email, phone_number
+            adm-user-delete -> email
+            adm-user-add-role -> email, role_id
+            adm-user-remove-role -> email, role_id
+            adm-role-create -> role_name
+            adm-role-delete -> role_name
+            adm-role-add-schema -> role_id, schema_id
+            adm-role-remove-schema -> role_id, schema_id
+            adm-list-role
+            adm-list-schema
+            adm-list-user
     """
-    params = {}
-    try:
-        if operation == "admin-user-create":
-            params = {"email": kwargs[0], "phone_number": kwargs[1]}
-        elif operation == "admin-user-delete":
-            params = {"email": kwargs[0]}
-        elif operation == "admin-database-add":
-            params = {"email": kwargs[0], "db_id": kwargs[1], "username": kwargs[2]}
-        elif operation == "admin-database-remove":
-            params = {"email": kwargs[0], "db_id": kwargs[1]}
-
-    except KeyError:
-        return "Ops, missing command parameters."
-    dbs_id = get_db_ids()
-    response = '>Operation Successful'
-
-    aws_conn = boto3.resource('dynamodb')
-    table = aws_conn.Table(os.getenv('DYNAMODB_USER_TABLE'))
+    if not User.exists(user_email, 'admin'):
+        return ">Access Denied"
 
     if not verify_mfa(user_email, 'admin', auth_client, use_push=True):
-        log(
-            'info',
-            'Failed MFA for User. Email: {}'.format(user_email)
-        )
         return '>MFA: Failed'
 
-    aws_conn = boto3.resource('dynamodb')
-    table = aws_conn.Table(os.getenv('DYNAMODB_USER_TABLE'))
+    # Get only the first two parts of the operation
+    main_op = "-".join(operation.split('-')[:2])
 
-    if operation == 'admin-database-list':
-        return get_db_list(0, None)
+    # Get the second part of the operation
+    second_op = operation.split('-', 2)[2]
 
-    email = params.get('email')
-    if operation == 'admin-user-create':
-        phone_number = params.get('phone_number')
-        User.create(table, auth_client, email, phone_number)
+    response = '>Operation Successful'  
+    if main_op == 'admin-user':
+        response = process_user(auth_client, [second_op] + args)
+
+    elif main_op == 'admin-role':
+        response = process_role([second_op] + args)
     
-    # The operations after this require the user to exist
-    if not User.exists(table, email):
-        return 'This user does not exist.'
+    elif main_op == 'admin-database':
+        response = process_database()
 
-    if operation == 'admin-database-remove':
-        db_id = params.get('db_id')
-        User.remove_access(table, email, db_id)
-
-    elif operation == 'admin-database-add':
-        db_id = params.get('db_id')
-        if db_id in dbs_id:
-            User.grant_access(table, email, db_id, params.get('username'))
-            return response
-
-        else:
-            return  'Access Denied'
-
-    elif operation == 'admin-user-delete':
-        User.delete(table, email)
+    if response == False:
+        response = '>Sorry, but something wen\'t wrong.'
 
     return response
 
 
-def process_command(operation, user_email, params):
+def process_command(operation, user_email, args):
     """Processes a given operation."""
     user_endpoints = ['user-database-access', 'user-database-list']
-    admin_endpoints = ['admin-database-add', 'admin-database-remove', 'admin-user-create', 'admin-user-delete', 'admin-database-list']
+    admin_endpoints = [
+            'admin-role-add-schema', 
+            'admin-role-remove-schema', 
+            'admin-role-create',
+            'admin-role-delete',
+            'admin-role-list',
+            'admin-user-create', 
+            'admin-user-delete',
+            'admin-user-add-role',
+            'admin-user-remove-role',
+            'admin-user-list',
+            'admin-database-list'
+        ]
 
-    auth_client_key = os.environ['AUTH_KEY']
-    auth_client_key = boto3.client('kms').decrypt(CiphertextBlob=b64decode(auth_client_key))['Plaintext']
-    auth_client_key = json.loads(auth_client_key.decode())
+    aws_conn = boto3.resource('dynamodb')
+    User.table = aws_conn.Table(os.getenv('DYNAMODB_USER_TABLE'))
+    Role.table = aws_conn.Table(os.getenv('DYNAMODB_ROLE_TABLE'))
+    Schema.table = aws_conn.Table(os.getenv('DYNAMODB_REGISTERED_DBS'))
+
+    auth_client_key = boto3.client('secretsmanager').get_secret_value(SecretId=os.environ['AUTH_KEY_SECRETSMANAGER_ARN'])['SecretString']
+    auth_client_key = json.loads(auth_client_key)
     
     auth_client = Duo(**auth_client_key)
     
     if operation in user_endpoints:
-        return process_user_op(operation, user_email, auth_client, params)
+        return process_user_op(operation, user_email, auth_client, args)
 
     if operation in admin_endpoints:
-        return process_admin_op(operation, user_email, auth_client, params)
+        return process_admin_op(operation, user_email, auth_client, args)
 
     return 'Unknown Error'
 
@@ -326,12 +305,10 @@ def lambda_handler(event, context):
     """Main Lambda function"""
     # Check if it's our keep alive call
     if event.get('source') == 'aws.events':
-        log(
-            'debug',
-            'Keep Warm triggered.'
-        )
+        logger.info({'status': 'aws.events', 'info': 'keep warm triggered'})
         return {'status_code': '200'}
 
+    # Avoid the same request multiple times
     if already_requested(
             context.aws_request_id,
             event['requestContext']['requestId'],
@@ -360,7 +337,7 @@ def lambda_handler(event, context):
     elif req.get('status') == 'success':
         values = req['values']
         response = process_command(values['op'], values['email'], values['params'])
-        request_type.response(response)
+        request_type.respond(response)
 
     return {
         'isBase64Encoded': False,
